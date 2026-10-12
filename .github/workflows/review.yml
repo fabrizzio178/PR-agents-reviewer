@@ -1,0 +1,158 @@
+name: PR Review Agent (reusable)
+
+# Reusable workflow: any repository can call it from a pull_request workflow.
+# See README "Usarlo en otro repo". The caller must grant
+# `contents: read` and `pull-requests: write`.
+on:
+  workflow_call:
+    inputs:
+      agent_repository:
+        description: Repository that hosts the agent's code.
+        type: string
+        default: fabrizzio178/PR-agents-reviewer
+      agent_ref:
+        description: Branch, tag or SHA of the agent to run. Pin a tag or SHA for stability.
+        type: string
+        default: main
+      llm_provider:
+        description: "'gemini' or 'openai-compatible'."
+        type: string
+        default: gemini
+      llm_model:
+        description: Model id. Required for openai-compatible; optional for gemini.
+        type: string
+        default: ""
+      llm_base_url:
+        description: Base URL ending in /v1. Required for openai-compatible.
+        type: string
+        default: ""
+      gate_severity:
+        description: Lowest severity that waits for human approval (low, medium, high).
+        type: string
+        default: high
+      approval_environment:
+        description: Protected environment (with required reviewers) that gates publishing.
+        type: string
+        default: review-approval
+    secrets:
+      GEMINI_API_KEY:
+        required: false
+      LLM_API_KEY:
+        required: false
+
+# A new push supersedes the previous review of the same PR, including one
+# still waiting for approval.
+concurrency:
+  group: pr-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.11.18"
+  REVIEW_GATE_SEVERITY: ${{ inputs.gate_severity }}
+  LLM_PROVIDER: ${{ inputs.llm_provider }}
+  LLM_MODEL: ${{ inputs.llm_model }}
+  GEMINI_MODEL: ${{ inputs.llm_provider == 'gemini' && inputs.llm_model || '' }}
+  LLM_BASE_URL: ${{ inputs.llm_base_url }}
+
+jobs:
+  analyze:
+    # Fork PRs get no secrets, so there is nothing useful to run.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      paused: ${{ steps.review.outputs.paused }}
+      thread_id: ${{ steps.review.outputs.thread_id }}
+    steps:
+      # The agent runs from a trusted ref...
+      - name: Check out agent
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.agent_repository }}
+          ref: ${{ inputs.agent_ref }}
+          path: agent
+          persist-credentials: false
+
+      # ...and the PR head is only data: read and linted, never executed.
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install agent
+        working-directory: agent
+        run: uv sync --frozen --no-dev
+
+      - name: Run review graph
+        id: review
+        working-directory: pr
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEW_CHECKPOINT_PATH: ${{ github.workspace }}/checkpoint.sqlite
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: >
+          uv run --project ../agent --frozen --no-dev
+          python -m agent_langgraph.entrypoints.github_action_entrypoint analyze
+
+      # The graph is suspended at interrupt(); its state has to outlive this runner.
+      - name: Save checkpoint for the approval job
+        if: steps.review.outputs.paused == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-checkpoint
+          path: ${{ github.workspace }}/checkpoint.sqlite
+          retention-days: 1
+          if-no-files-found: error
+
+  approve:
+    needs: analyze
+    if: needs.analyze.outputs.paused == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Protected environment with required reviewers: GitHub holds this job
+    # until a maintainer approves. That approval is the human in the loop.
+    environment: ${{ inputs.approval_environment }}
+    steps:
+      - name: Check out agent
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.agent_repository }}
+          ref: ${{ inputs.agent_ref }}
+          path: agent
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install agent
+        working-directory: agent
+        run: uv sync --frozen --no-dev
+
+      - name: Restore checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: review-checkpoint
+          path: ${{ github.workspace }}
+
+      - name: Resume graph and publish
+        working-directory: agent
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEW_CHECKPOINT_PATH: ${{ github.workspace }}/checkpoint.sqlite
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          THREAD_ID: ${{ needs.analyze.outputs.thread_id }}
+        run: >
+          uv run --frozen --no-dev
+          python -m agent_langgraph.entrypoints.github_action_entrypoint resume
+          --thread "$THREAD_ID"

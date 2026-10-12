@@ -1,0 +1,35 @@
+name: Evals
+
+# Manual only: it calls the real model, so it costs quota and is not
+# deterministic enough to gate every PR. Run it when a prompt or the model changes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.18"
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Run evals
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || '' }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || '' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          set -o pipefail
+          uv run --frozen --no-dev eval --fail-under | tee -a "$GITHUB_STEP_SUMMARY"
