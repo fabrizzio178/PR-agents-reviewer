@@ -71,26 +71,26 @@ job efímero de GitHub Actions:
 
 ```mermaid
 flowchart TD
-    PR([pull_request opened / synchronize]) --> A[Job analyze]
-    subgraph G[Grafo LangGraph]
-        ingest[ingest: diff del PR, paginado y truncado] --> sup{supervisor}
-        sup -. .py .-> sa[static_analysis: ruff JSON]
-        sup -. codigo/config/deps .-> sec[security agent]
-        sup -. codigo .-> arch[code_arch agent]
-        sup -. solo docs .-> agg
-        sa --> agg[aggregator: dedupe + ranking]
+    PR(["pull_request opened / synchronize"]) --> A["Job analyze"]
+    subgraph G["Grafo LangGraph"]
+        ingest["ingest: diff del PR, paginado y truncado"] --> sup{"supervisor"}
+        sup -.->|"archivos .py"| sa["static_analysis: ruff JSON"]
+        sup -.->|"codigo, config, deps"| sec["security agent"]
+        sup -.->|"codigo"| arch["code_arch agent"]
+        sup -.->|"solo docs"| agg
+        sa --> agg["aggregator: dedupe + ranking"]
         sec --> agg
         arch --> agg
-        agg --> gate{risk gate}
-        gate -- max < HIGH --> post[post: review inline + comentario sticky]
-        gate -- HIGH --> np[notify_pending: sticky 'esperando aprobacion']
-        np --> hr[[human_review: interrupt]]
-        hr -- approved / rejected --> post
+        agg --> gate{"risk gate"}
+        gate -->|"menor que HIGH"| post["post: review inline + comentario sticky"]
+        gate -->|"HIGH"| np["notify_pending: aviso de espera"]
+        np --> hr[["human_review: interrupt"]]
+        hr -->|"approved / rejected"| post
     end
     A --> ingest
-    hr -. pausa: checkpoint SQLite como artifact .-> J2[Job approve<br/>environment con required reviewers]
-    J2 -. Command resume .-> hr
-    post --> END([fin])
+    hr -.->|"pausa: checkpoint SQLite como artifact"| J2["Job approve<br/>environment con required reviewers"]
+    J2 -.->|"Command resume"| hr
+    post --> fin(["fin"])
 ```
 
 La topología exacta compilada se regenera en [graph.mmd](graph.mmd) con
