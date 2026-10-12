@@ -13,6 +13,41 @@ hallazgos se agregan y se ordenan por severidad, y los de severidad alta
 pausan el grafo (`interrupt()`) hasta que un humano aprueba desde GitHub —
 en otro job, en otro runner, reanudando el mismo checkpoint.
 
+## Demo
+
+Una PR real de este repo con código defectuoso a propósito:
+[#1 — Demo: showcase the PR review agent](https://github.com/fabrizzio178/PR-agents-reviewer/pull/1).
+
+**1. El agente encuentra algo grave y no lo publica solo.** Deja un aviso en
+la PR y pide aprobación:
+
+![Comentario de espera en la PR](docs/img/01-pending-comment.png)
+
+**2. El grafo queda pausado entre dos jobs.** `analyze` terminó y subió su
+checkpoint; `approve` espera a un maintainer:
+
+![Ejecución pausada esperando aprobación](docs/img/02-paused-run.png)
+
+**3. El maintainer lee la revisión completa y decide** desde la UI de GitHub:
+
+![Diálogo de aprobación del deployment](docs/img/03-approve-dialog.png)
+
+![Revisión completa que se va a publicar](docs/img/04-review-summary.png)
+
+En esa corrida el tier gratuito de Gemini se quedó sin cuota justo para el
+segundo agente. El resumen lo dice ("Incomplete review") en lugar de dar la
+revisión por buena: un fallo nunca se reporta como "sin problemas".
+
+**4. Al aprobar, el grafo se reanuda en otro runner** y publica los hallazgos
+sobre las líneas del diff, sin volver a llamar al modelo:
+
+![Comentario inline sobre el secreto hardcodeado](docs/img/05-inline-comment.png)
+
+Los hallazgos del linter y los de los agentes LLM salen juntos, cada uno con
+su origen:
+
+![Comentarios de ruff y del agente de seguridad](docs/img/06-inline-ruff-and-llm.png)
+
 Documentos que gobiernan el proyecto:
 
 - [docs/SPEC.md](docs/SPEC.md) — qué hace y por qué.
