@@ -14,3 +14,9 @@ wheels/
 *.sqlite
 *.sqlite-*
 
+
+# Tool caches and crash dumps
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.stackdump
