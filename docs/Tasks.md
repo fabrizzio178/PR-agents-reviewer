@@ -110,6 +110,13 @@ uv run ruff check && uv run ruff format --check && uv run mypy src && uv run pyt
 - [x] **7b.2 Workflow reutilizable** (`review.yml`, `workflow_call`);
   `pr-review.yml` pasa a ser el caller de este repo.
 
+## 7c. Configuración por repo
+
+- [x] **7c.1 `.pr-review.yml`** leído del commit base: revisores activos,
+  paths ignorados, severidad del gate y reglas propias.
+  — `adapters/github/rest_config_provider.py`, `application/nodes/ingest.py`
+  - Verifica: `pytest tests/unit/test_repo_config.py`
+
 ## 8. Manual (requiere credenciales y GitHub real)
 
 - [ ] **8.1** Crear el Environment `review-approval` en *Settings →

@@ -45,6 +45,11 @@ primero, con su motivo, y recién después en el código.
 
 ## IV. Seguridad
 
+14b. **La configuración del repo se lee de la rama base, nunca del head del
+    PR.** Un PR no puede apagar a sus propios revisores ni cambiar las reglas
+    con las que se lo evalúa. Una config inválida se ignora con aviso; no
+    bloquea ni silencia la revisión.
+
 15. **Nunca `pull_request_target`.** El workflow no corre con secrets sobre
     código de forks.
 16. **Permisos mínimos del token**: `contents: read`, `pull-requests: write`.

@@ -147,6 +147,27 @@ prompt y la respuesta se valida al recibirla. Un modelo que responde mal
 produce "revisión incompleta", no un falso limpio — pero **cada modelo nuevo
 exige correr las evals** antes de confiar en sus revisiones.
 
+## Configurar qué se revisa
+
+Cada repo puede tener un `.pr-review.yml` opcional en su raíz:
+
+```yaml
+reviewers:
+  code_arch: false          # apagar un revisor (static_analysis, security, code_arch)
+ignore:
+  - "migrations/"           # un árbol entero
+  - "*.lock"                # glob sobre el path completo
+gate_severity: medium       # desde qué severidad se pide aprobación humana
+rules:                      # reglas propias del repo, en texto
+  - "Toda ruta nueva bajo /api debe exigir autenticación."
+  - "Nunca loguear emails ni tokens."
+```
+
+Se lee de la **rama base** del PR, no del PR: un cambio a este archivo recién
+aplica después de mergearse, así nadie puede apagar la revisión de su propio
+PR. Si el archivo tiene un error, se revisa con los valores por defecto y el
+comentario lo avisa.
+
 ## Usarlo en otro repo
 
 En el repo que quieres revisar:

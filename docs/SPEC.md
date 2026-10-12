@@ -117,7 +117,8 @@ La topología exacta compilada se regenera en [graph.mmd](graph.mmd) con
 | Campo | Tipo | Lo escribe | Notas |
 |---|---|---|---|
 | `target` | `ReviewTarget(repo, pr_number, head_sha)` | entrada | |
-| `files` | `list[FileChange]` | ingest | Ya con presupuesto aplicado. |
+| `repo_config`, `config_warning` | `RepoConfig`, `str` | ingest | De `.pr-review.yml` en la rama base. |
+| `files` | `list[FileChange]` | ingest | Sin los paths ignorados y con presupuesto aplicado. |
 | `truncated_files` | `list[str]` | ingest | Paths recortados u omitidos. |
 | `active_agents` | `list[str]` | supervisor | Vacío = solo docs. |
 | `findings` | `list[Finding]` + reducer `add` | ramas paralelas | |
@@ -155,6 +156,27 @@ en el resumen.
   truncados y uso de tokens.
 - **Inline**: un review `COMMENT` con un comentario por hallazgo ubicable. No
   se re-publica un comentario idéntico ya existente en la misma línea.
+
+### Configuración por repo (`.pr-review.yml`)
+
+Archivo opcional en la raíz del repo revisado. Se lee del commit base del PR.
+
+```yaml
+reviewers:            # todos activos por defecto
+  static_analysis: true
+  security: true
+  code_arch: false
+ignore:               # globs sobre el path completo; "dir/" ignora el árbol
+  - "migrations/"
+  - "*.lock"
+gate_severity: high   # low | medium | high
+rules:                # hasta 20, 300 caracteres c/u; van al prompt de sistema
+  - "Nunca loguear emails ni tokens."
+```
+
+Claves desconocidas o valores inválidos invalidan el archivo entero: se
+revisa con los defaults y el resumen lo informa. `gate_severity` del archivo
+tiene prioridad sobre el input del workflow.
 
 ## 8. Requisitos no funcionales
 

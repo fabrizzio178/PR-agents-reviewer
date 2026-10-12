@@ -1,0 +1,10 @@
+# Review settings for this repository. Read from the base branch of each PR.
+# Reference: README "Configurar qué se revisa".
+ignore:
+  - "uv.lock"
+  # Eval fixtures are vulnerable on purpose.
+  - "evals/"
+rules:
+  - "Nodes in application/ must not import adapters, requests, subprocess or an LLM SDK; IO goes through a port in domain/ports.py."
+  - "Environment variables are read only under entrypoints/."
+  - "A failure of an LLM or analyzer call must never be reported as a clean review."
