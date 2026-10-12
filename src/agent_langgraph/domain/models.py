@@ -13,6 +13,20 @@ class Severity(StrEnum):
     MEDIUM = "medium"
     HIGH = "high"
 
+    @property
+    def rank(self) -> int:
+        return _SEVERITY_RANK[self]
+
+
+_SEVERITY_RANK = {Severity.LOW: 0, Severity.MEDIUM: 1, Severity.HIGH: 2}
+
+
+@dataclass(frozen=True)
+class ReviewTarget:
+    repo: str
+    pr_number: int
+    head_sha: str
+
 
 @dataclass(frozen=True)
 class FileChange:
@@ -20,6 +34,17 @@ class FileChange:
     patch: str
     additions: int
     deletions: int
+    truncated: bool = False
+
+
+@dataclass(frozen=True)
+class ReviewItem:
+    """A finding as returned by an LLM, before it is attributed to an agent."""
+
+    file: str
+    message: str
+    severity: Severity
+    line: int | None = None
 
 
 @dataclass(frozen=True)
@@ -28,6 +53,32 @@ class Finding:
     file: str
     message: str
     severity: Severity
+    line: int | None = None
+
+
+@dataclass(frozen=True)
+class InlineComment:
+    path: str
+    line: int
+    body: str
+
+
+@dataclass(frozen=True)
+class TokenUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    def __add__(self, other: TokenUsage) -> TokenUsage:
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+        )
+
+
+@dataclass(frozen=True)
+class LLMResult:
+    items: list[ReviewItem]
+    usage: TokenUsage
 
 
 @dataclass(frozen=True)
@@ -35,23 +86,23 @@ class ReviewVerdict:
     findings: list[Finding]
     max_severity: Severity
     requires_human_review: bool
-    summary: str
 
 
 class GraphState(TypedDict, total=False):
     """Shared state threaded through every LangGraph node.
 
-    `findings` uses operator.add as its reducer so the parallel security/
-    code_arch branches can each append to the same list without clobbering
-    each other's writes in the same super-step.
+    `findings`, `agent_errors` and `usage` carry reducers so the parallel
+    branches can each write to them without clobbering each other's updates
+    in the same super-step.
     """
 
-    repo: str
-    commit_sha: str
+    target: ReviewTarget
     files: list[FileChange]
-    static_analysis_output: str
+    truncated_files: list[str]
     active_agents: list[str]
     findings: Annotated[list[Finding], operator.add]
+    agent_errors: Annotated[list[str], operator.add]
+    usage: Annotated[TokenUsage, operator.add]
     verdict: ReviewVerdict | None
     human_approved: bool | None
     comment_body: str | None
