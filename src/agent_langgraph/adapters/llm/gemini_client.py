@@ -52,7 +52,9 @@ class GeminiLLMClient:
                 ),
             )
         except errors.APIError as exc:
-            raise LLMError(f"Gemini request failed: {exc}") from exc
+            # Short on purpose: this text ends up in the PR comment. The full
+            # provider message stays available as the exception's cause.
+            raise LLMError(f"Gemini request failed: {exc.code} {exc.status}") from exc
 
         usage = response.usage_metadata
         return LLMResult(
