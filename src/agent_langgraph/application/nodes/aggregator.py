@@ -1,30 +1,38 @@
-"""AGGREGATOR node: merges findings from every agent branch and ranks by severity."""
+"""AGGREGATOR node: merges findings from every branch, dedupes and ranks by severity."""
 
 from __future__ import annotations
 
-from agent_langgraph.domain.models import GraphState, ReviewVerdict, Severity
+from collections.abc import Callable
+from typing import Any
 
-_ORDER = {Severity.LOW: 0, Severity.MEDIUM: 1, Severity.HIGH: 2}
+from agent_langgraph.application.deps import GraphDeps
+from agent_langgraph.domain.models import Finding, GraphState, ReviewVerdict, Severity
 
 
-def aggregator(state: GraphState) -> dict:
-    findings = state.get("findings", [])
-    if not findings:
+def make_aggregator(deps: GraphDeps) -> Callable[[GraphState], dict[str, Any]]:
+    def aggregator(state: GraphState) -> dict[str, Any]:
+        ranked = sorted(
+            _dedupe(state.get("findings", [])),
+            key=lambda f: (-f.severity.rank, f.file, f.line or 0),
+        )
+        max_severity = ranked[0].severity if ranked else Severity.LOW
         verdict = ReviewVerdict(
-            findings=[],
-            max_severity=Severity.LOW,
-            requires_human_review=False,
-            summary="No issues found.",
+            findings=ranked,
+            max_severity=max_severity,
+            requires_human_review=bool(ranked)
+            and max_severity.rank >= deps.config.gate_severity.rank,
         )
         return {"verdict": verdict}
 
-    ranked = sorted(findings, key=lambda f: _ORDER[f.severity], reverse=True)
-    max_severity = ranked[0].severity
-    summary = "\n".join(f"- [{f.severity.value.upper()}] {f.file}: {f.message}" for f in ranked)
-    verdict = ReviewVerdict(
-        findings=ranked,
-        max_severity=max_severity,
-        requires_human_review=max_severity == Severity.HIGH,
-        summary=summary,
-    )
-    return {"verdict": verdict}
+    return aggregator
+
+
+def _dedupe(findings: list[Finding]) -> list[Finding]:
+    """Collapse the same issue reported by two agents, keeping the higher severity."""
+    best: dict[tuple[str, int | None, str], Finding] = {}
+    for finding in findings:
+        key = (finding.file, finding.line, finding.message.strip().lower())
+        current = best.get(key)
+        if current is None or finding.severity.rank > current.severity.rank:
+            best[key] = finding
+    return list(best.values())
