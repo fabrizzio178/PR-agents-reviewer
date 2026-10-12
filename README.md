@@ -1,108 +1,217 @@
 # agent-langgraph — PR Review Agent
 
-Un bot de revisión de código multi-agente construido con **LangGraph**,
-disparado por GitHub Actions en cada push. Sin servidor corriendo, sin costo
-de infraestructura: el grafo se ejecuta como un job efímero de CI y termina.
+Un bot de revisión de Pull Requests multi-agente construido con **LangGraph**,
+disparado por GitHub Actions. Sin servidor corriendo, sin costo de
+infraestructura: el grafo se ejecuta como un job efímero de CI y termina.
 
 ## Por qué existe esto
 
 La mayoría de los demos de "AI code review" son un solo prompt disfrazado de
 chat. Este proyecto es un ejercicio real de orquestación: un supervisor
-enruta el trabajo a agentes especializados solo cuando corresponde, los
-hallazgos se agregan y se ordenan por severidad, y los resultados de
-severidad alta pausan el grafo para que decida un humano (`interrupt()`) en
-vez de postear automáticamente.
+enruta el trabajo a revisores especializados solo cuando corresponde, los
+hallazgos se agregan y se ordenan por severidad, y los de severidad alta
+pausan el grafo (`interrupt()`) hasta que un humano aprueba desde GitHub —
+en otro job, en otro runner, reanudando el mismo checkpoint.
+
+Documentos que gobiernan el proyecto:
+
+- [docs/SPEC.md](docs/SPEC.md) — qué hace y por qué.
+- [docs/Constitution.md](docs/Constitution.md) — reglas innegociables.
+- [docs/Tasks.md](docs/Tasks.md) — plan de ejecución verificable.
+
+## Flujo
+
+```mermaid
+flowchart TD
+    PR([pull_request opened / synchronize]) --> A[Job analyze]
+    subgraph G[Grafo LangGraph]
+        ingest[ingest: diff del PR, paginado y truncado] --> sup{supervisor}
+        sup -. .py .-> sa[static_analysis: ruff JSON]
+        sup -. codigo/config/deps .-> sec[security agent]
+        sup -. codigo .-> arch[code_arch agent]
+        sup -. solo docs .-> agg
+        sa --> agg[aggregator: dedupe + ranking]
+        sec --> agg
+        arch --> agg
+        agg --> gate{risk gate}
+        gate -- max < HIGH --> post[post: review inline + comentario sticky]
+        gate -- HIGH --> np[notify_pending: sticky 'esperando aprobacion']
+        np --> hr[[human_review: interrupt]]
+        hr -- approved / rejected --> post
+    end
+    A --> ingest
+    hr -. pausa: checkpoint SQLite como artifact .-> J2[Job approve<br/>environment con required reviewers]
+    J2 -. Command resume .-> hr
+    post --> END([fin])
+```
+
+La topología compilada exacta está en [docs/graph.mmd](docs/graph.mmd); se
+regenera con `uv run visualize-graph`.
+
+- El **supervisor** activa solo lo que el diff necesita: un cambio de solo
+  documentación no llama a ningún revisor; un `Dockerfile` o un
+  `requirements.txt` activa seguridad pero no arquitectura.
+- **static_analysis** (ruff), **security** y **code_arch** corren como un
+  fan-out paralelo real y escriben a la misma lista `findings` mediante un
+  reducer.
+- Los agentes LLM devuelven **salida estructurada** validada contra un
+  schema. Si un agente falla, el comentario lo dice ("revisión incompleta");
+  un fallo nunca se publica como "sin problemas".
+- El **risk gate** enruta los veredictos de severidad alta a `human_review`.
+  El PR ve un aviso de "esperando aprobación" y los detalles se publican
+  recién cuando un maintainer aprueba.
+- La publicación es **idempotente**: un único comentario resumen que se
+  actualiza en cada push, más comentarios inline sobre las líneas del diff.
 
 ## Arquitectura
 
 Hexagonal / puertos y adaptadores, así reemplazar GitHub REST por un
-adaptador basado en MCP más adelante es cambiar un solo archivo:
+adaptador basado en MCP, o Gemini por otro modelo, es cambiar un archivo:
 
 ```
 src/agent_langgraph/
-  domain/         # datos puros (GraphState, Finding, Severity) + puertos (Protocol)
-  application/    # el grafo de LangGraph en sí + un nodo por archivo
-  adapters/       # implementaciones concretas de los puertos (GitHub REST, Gemini, ruff)
-  entrypoints/    # composition root: CLI para correr local, entrypoint de GitHub Actions
+  domain/         # datos puros, utilidades de diff, puertos (Protocol), errores
+  application/    # el grafo de LangGraph, un nodo por archivo, prompts, rendering
+  adapters/       # GitHub REST, Gemini, ruff
+  entrypoints/    # composition root: settings, CLI, GitHub Actions, evals
+  evals/          # dataset loader y scoring
+evals/dataset.jsonl
+tests/unit, tests/integration
 ```
-
-## Grafo de decisiones
-
-```mermaid
-graph TD;
-	__start__([<p>__start__</p>]):::first
-	ingest(ingest)
-	static_analysis(static_analysis)
-	supervisor(supervisor)
-	security(security)
-	code_arch(code_arch)
-	aggregator(aggregator)
-	human_review(human_review)
-	post(post)
-	__end__([<p>__end__</p>]):::last
-	__start__ --> ingest;
-	ingest --> static_analysis;
-	static_analysis --> supervisor;
-	supervisor -.-> code_arch;
-	supervisor -.-> security;
-	code_arch --> aggregator;
-	security --> aggregator;
-	aggregator -.-> human_review;
-	aggregator -.-> post;
-	human_review --> post;
-	post --> __end__;
-	classDef default fill:#f2f0ff,line-height:1.2
-	classDef first fill-opacity:0
-	classDef last fill:#bfb6fc
-```
-
-Para regenerar este diagrama cada vez que cambie el grafo: `uv run
-visualize-graph` (escribe `docs/graph.mmd`).
-
-- El **supervisor** solo activa el agente de `security` cuando el diff toca
-  archivos de código/config — un cambio de solo documentación lo salta.
-- **security** y **code_arch** corren como un fan-out paralelo real (edges
-  condicionales de LangGraph devolviendo múltiples claves), y cada uno
-  escribe a la misma lista `findings` mediante un reducer `operator.add`.
-- El **risk gate** (un edge condicional, no un nodo) enruta los veredictos
-  de severidad alta a `human_review`, que llama a `interrupt()` — el grafo
-  se suspende de verdad hasta que un humano lo reanuda con una decisión de
-  aprobación. Esto requiere el checkpointer de SQLite para persistir el
-  estado durante la pausa.
 
 ## Stack
 
 - Python 3.12, manejado con `uv`
-- LangGraph (SDK oficial) para el grafo/máquina de estados
-- Gemini (`gemini-2.5-flash`, vía Google AI Studio) como LLM — tier gratuito, sin suscripción
-- API REST de GitHub para traer el diff y comentar (MVP: sin MCP todavía)
+- LangGraph para el grafo, checkpointer SQLite para pausar/reanudar
+- LLM intercambiable: Gemini (`gemini-2.5-flash`) o cualquier API compatible con OpenAI
+- API REST de GitHub
 - `ruff` para análisis estático (ese nodo no llama al LLM)
 
 ## Setup
 
 ```bash
 uv sync
-cp .env.example .env   # completar GITHUB_TOKEN y GEMINI_API_KEY
+cp .env.example .env   # completar GITHUB_TOKEN y la key del proveedor de LLM
 ```
 
 ## Correr localmente
 
 ```bash
-uv run review --repo owner/name --sha <commit_sha>
+uv run review run --repo owner/name --pr 12
 ```
 
-Si un hallazgo de severidad alta dispara revisión humana, la CLI imprime el
-resumen y pregunta por la aprobación antes de postear.
+Si hay hallazgos de severidad alta, la CLI muestra la revisión completa y
+pregunta antes de publicar. En modo no interactivo imprime el `thread_id`
+para decidir después:
+
+```bash
+uv run review resume --thread '<thread_id>' --approve   # o --reject
+```
 
 ## CI
 
-`.github/workflows/pr-review.yml` corre el agente en cada push a una rama
-que no sea `main`, usando `GEMINI_API_KEY` como secret del repo. Sin
-servidores, sin costo de idle — es un job, no un servicio.
+| Workflow | Cuándo | Qué hace |
+|---|---|---|
+| `review.yml` | lo llaman otros workflows | Reutilizable. Job `analyze` corre el grafo; si pausa, sube el checkpoint. Job `approve` espera aprobación y reanuda. |
+| `pr-review.yml` | cada PR de este repo | Llama a `review.yml` para revisar los PRs del propio agente. |
+| `ci.yml` | push a `main` y PRs | `ruff check`, `ruff format --check`, `mypy`, `pytest`. |
+| `evals.yml` | manual | Corre las evals contra el modelo real. |
+
+Configuración necesaria, una sola vez:
+
+1. Secret del repo `GEMINI_API_KEY`.
+2. *Settings → Environments → New environment* llamado **`review-approval`**,
+   con *Required reviewers*. Sin reviewers configurados, el job `approve`
+   corre sin esperar y los hallazgos HIGH se publican directo.
+
+El agente corre desde la rama base y trata el head del PR como datos: lo lee
+y lo lintea, nunca lo ejecuta. Por eso el PR que *introduce* un cambio en el
+agente se revisa con la versión anterior.
+
+## Elegir el modelo
+
+Por defecto usa Gemini. Para cualquier API compatible con OpenAI (OpenCode
+Zen, OpenRouter, DeepSeek) se configura sin tocar código:
+
+| Dónde | Qué |
+|---|---|
+| Local (`.env`) | `LLM_PROVIDER=openai-compatible`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` |
+| GitHub, secret | `LLM_API_KEY` |
+| GitHub, variables (*Settings → Secrets and variables → Actions → Variables*) | `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL` |
+
+Ejemplo con OpenCode Zen: `LLM_BASE_URL=https://opencode.ai/zen/v1` y en
+`LLM_MODEL` el id de un modelo que use el endpoint `/chat/completions`.
+
+Con Gemini la API impone el schema de salida; con el resto el schema va en el
+prompt y la respuesta se valida al recibirla. Un modelo que responde mal
+produce "revisión incompleta", no un falso limpio — pero **cada modelo nuevo
+exige correr las evals** antes de confiar en sus revisiones.
+
+## Usarlo en otro repo
+
+En el repo que quieres revisar:
+
+1. Crea `.github/workflows/pr-review.yml`:
+
+   ```yaml
+   name: PR Review Agent
+   on:
+     pull_request:
+       types: [opened, synchronize, reopened]
+   permissions:
+     contents: read
+     pull-requests: write
+   jobs:
+     review:
+       uses: fabrizzio178/PR-agents-reviewer/.github/workflows/review.yml@main
+       with:
+         llm_provider: gemini          # u openai-compatible + llm_base_url + llm_model
+       secrets:
+         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+         # LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+   ```
+
+2. Carga en ese repo el secret de la key que uses.
+3. Crea ahí el Environment `review-approval` con *Required reviewers*.
+
+Inputs opcionales: `agent_ref` (fijar un tag o SHA del agente en vez de
+`main`), `gate_severity` y `approval_environment`. El análisis estático solo
+cubre Python; los agentes LLM revisan cualquier lenguaje que el supervisor
+reconozca.
+
+## Calidad
+
+```bash
+uv run ruff check && uv run ruff format --check && uv run mypy && uv run pytest
+```
+
+Los tests no usan red ni credenciales: el grafo completo corre contra
+implementaciones en memoria de los puertos, incluida la reanudación desde
+SQLite en un proceso nuevo.
+
+## Evals
+
+`evals/dataset.jsonl` tiene diffs pequeños con el hallazgo que un revisor
+competente debe reportar (secretos, SQL injection, auth faltante, un intento
+de prompt injection, breaking changes) y casos limpios para medir falsos
+positivos.
+
+```bash
+uv run eval                 # tabla de recall/precision por agente
+uv run eval --fail-under    # exit 1 si no cumple los umbrales del SPEC
+```
+
+Cambiar un prompt o el modelo exige correr las evals (Constitution §10).
+
+## Observabilidad
+
+Cada nodo emite una línea JSON a stderr con su nombre, resultado y duración.
+El comentario publicado incluye los tokens consumidos. Para trazas completas,
+definir `LANGSMITH_TRACING=true` y `LANGSMITH_API_KEY`.
 
 ## Roadmap
 
-- [ ] Reemplazar el adaptador REST de GitHub por el MCP server oficial de GitHub
-- [ ] Canal de aprobación asíncrono real (Slack/GitHub check-run) en vez del
-      resume solo-por-CLI actual
+- [ ] Adaptador de GitHub basado en el MCP server oficial
 - [ ] Analizadores estáticos por lenguaje más allá de `ruff`
+- [ ] Sugerencias aplicables (`suggestion` blocks) en los comentarios inline
+- [ ] Contexto del repositorio más allá del diff (archivos relacionados)

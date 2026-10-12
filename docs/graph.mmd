@@ -6,24 +6,28 @@ config:
 graph TD;
 	__start__([<p>__start__</p>]):::first
 	ingest(ingest)
-	static_analysis(static_analysis)
 	supervisor(supervisor)
+	static_analysis(static_analysis)
 	security(security)
 	code_arch(code_arch)
 	aggregator(aggregator)
+	notify_pending(notify_pending)
 	human_review(human_review)
 	post(post)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> ingest;
-	aggregator -.-> human_review;
+	aggregator -.-> notify_pending;
 	aggregator -.-> post;
 	code_arch --> aggregator;
 	human_review --> post;
-	ingest --> static_analysis;
+	ingest --> supervisor;
+	notify_pending --> human_review;
 	security --> aggregator;
-	static_analysis --> supervisor;
+	static_analysis --> aggregator;
+	supervisor -.-> aggregator;
 	supervisor -.-> code_arch;
 	supervisor -.-> security;
+	supervisor -.-> static_analysis;
 	post --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
