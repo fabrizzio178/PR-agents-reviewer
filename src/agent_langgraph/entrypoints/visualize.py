@@ -20,7 +20,13 @@ OUTPUT_PATH = Path(__file__).resolve().parents[3] / "docs" / "graph.mmd"
 def main() -> int:
     # Structure-only: build_graph never calls the adapters, it only wires
     # nodes and edges, so None stand-ins are enough to compile and draw it.
-    deps = GraphDeps(diff_provider=None, publisher=None, static_analyzer=None, llm=None)  # type: ignore[arg-type]
+    deps = GraphDeps(
+        diff_provider=None,  # type: ignore[arg-type]
+        config_provider=None,  # type: ignore[arg-type]
+        publisher=None,  # type: ignore[arg-type]
+        static_analyzer=None,  # type: ignore[arg-type]
+        llm=None,  # type: ignore[arg-type]
+    )
     graph = build_graph(deps)
 
     mermaid_source = graph.get_graph().draw_mermaid()

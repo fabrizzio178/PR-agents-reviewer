@@ -49,6 +49,22 @@ CODE_ARCH_PROMPT = (
 )
 
 
+def with_repo_rules(system_prompt: str, rules: list[str]) -> str:
+    """Append the repository's own review rules to an agent's system prompt.
+
+    Rules come from the config on the base branch, which maintainers control.
+    They are trusted in a way the diff is not.
+    """
+    if not rules:
+        return system_prompt
+    listed = "\n".join(f"- {rule}" for rule in rules)
+    return (
+        f"{system_prompt}\n\nThis repository's maintainers also require these rules. "
+        "Report a violation of any that falls within your focus, even if it would "
+        f"otherwise seem acceptable:\n{listed}"
+    )
+
+
 def render_diff(files: list[FileChange]) -> str:
     """Render the reviewable files as the delimited user message."""
     blocks = []

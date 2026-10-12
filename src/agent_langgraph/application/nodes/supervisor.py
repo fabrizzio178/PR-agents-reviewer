@@ -40,7 +40,8 @@ def supervisor(state: GraphState) -> dict[str, Any]:
         active.append(SECURITY)
     if any(p.suffix.lower() in CODE_EXTENSIONS for p in paths):
         active.append(CODE_ARCH)
-    return {"active_agents": active}
+    disabled = state["repo_config"].disabled_reviewers if "repo_config" in state else []
+    return {"active_agents": [name for name in active if name not in disabled]}
 
 
 def route_from_supervisor(state: GraphState) -> list[str]:

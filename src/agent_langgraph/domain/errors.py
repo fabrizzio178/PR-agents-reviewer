@@ -11,5 +11,9 @@ class LLMError(ReviewError):
     """The LLM call failed or returned output that does not match the schema."""
 
 
+class ConfigError(ReviewError):
+    """The repository's review config exists but cannot be used."""
+
+
 class StaticAnalysisError(ReviewError):
     """The static analyzer could not run or returned unreadable output."""

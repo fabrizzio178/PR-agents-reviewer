@@ -15,12 +15,22 @@ from agent_langgraph.domain.models import (
     Finding,
     InlineComment,
     LLMResult,
+    RepoConfig,
     ReviewTarget,
 )
 
 
 class DiffProvider(Protocol):
     def get_changed_files(self, target: ReviewTarget) -> list[FileChange]: ...
+
+
+class RepoConfigProvider(Protocol):
+    def load(self, target: ReviewTarget) -> RepoConfig:
+        """Return the repo's review config, or defaults if it has none.
+
+        Raises ConfigError if the file exists but is invalid.
+        """
+        ...
 
 
 class ReviewPublisher(Protocol):

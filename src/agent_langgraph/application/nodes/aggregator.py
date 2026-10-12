@@ -16,11 +16,12 @@ def make_aggregator(deps: GraphDeps) -> Callable[[GraphState], dict[str, Any]]:
             key=lambda f: (-f.severity.rank, f.file, f.line or 0),
         )
         max_severity = ranked[0].severity if ranked else Severity.LOW
+        repo_config = state.get("repo_config")
+        gate = (repo_config.gate_severity if repo_config else None) or deps.config.gate_severity
         verdict = ReviewVerdict(
             findings=ranked,
             max_severity=max_severity,
-            requires_human_review=bool(ranked)
-            and max_severity.rank >= deps.config.gate_severity.rank,
+            requires_human_review=bool(ranked) and max_severity.rank >= gate.rank,
         )
         return {"verdict": verdict}
 

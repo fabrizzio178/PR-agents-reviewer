@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from agent_langgraph.application.deps import GraphDeps
-from agent_langgraph.application.prompts import render_diff
+from agent_langgraph.application.prompts import render_diff, with_repo_rules
 from agent_langgraph.domain.errors import LLMError
 from agent_langgraph.domain.models import Finding, GraphState
 
@@ -23,8 +23,10 @@ def make_review_agent(
     name: str, system_prompt: str, deps: GraphDeps
 ) -> Callable[[GraphState], dict[str, Any]]:
     def review_agent(state: GraphState) -> dict[str, Any]:
+        repo_config = state.get("repo_config")
+        prompt = with_repo_rules(system_prompt, repo_config.rules if repo_config else [])
         try:
-            result = deps.llm.review(system_prompt, render_diff(state["files"]))
+            result = deps.llm.review(prompt, render_diff(state["files"]))
         except LLMError as exc:
             logger.warning("agent %s failed: %s", name, exc)
             return {"agent_errors": [f"{name}: {exc}"]}

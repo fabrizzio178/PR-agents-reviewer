@@ -7,6 +7,7 @@ classes — everything else depends on ports.
 from __future__ import annotations
 
 from agent_langgraph.adapters.github.rest_client import GitHubRestClient
+from agent_langgraph.adapters.github.rest_config_provider import GitHubRestConfigProvider
 from agent_langgraph.adapters.github.rest_diff_provider import GitHubRestDiffProvider
 from agent_langgraph.adapters.github.rest_review_publisher import GitHubRestReviewPublisher
 from agent_langgraph.adapters.llm.gemini_client import GeminiLLMClient
@@ -28,6 +29,7 @@ def build_deps(settings: Settings) -> GraphDeps:
     github = GitHubRestClient(settings.github_token)
     return GraphDeps(
         diff_provider=GitHubRestDiffProvider(github),
+        config_provider=GitHubRestConfigProvider(github),
         publisher=GitHubRestReviewPublisher(github),
         static_analyzer=RuffStaticAnalyzer(),
         llm=build_llm(settings.llm),

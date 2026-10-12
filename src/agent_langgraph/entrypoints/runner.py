@@ -30,6 +30,7 @@ _CHECKPOINT_TYPES = (
     models.Severity,
     models.TokenUsage,
     models.ReviewVerdict,
+    models.RepoConfig,
 )
 
 

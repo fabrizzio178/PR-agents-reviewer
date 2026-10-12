@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agent_langgraph.domain.models import Severity
-from agent_langgraph.domain.ports import DiffProvider, LLMClient, ReviewPublisher, StaticAnalyzer
+from agent_langgraph.domain.ports import (
+    DiffProvider,
+    LLMClient,
+    RepoConfigProvider,
+    ReviewPublisher,
+    StaticAnalyzer,
+)
 
 
 @dataclass(frozen=True)
@@ -19,6 +25,7 @@ class ReviewConfig:
 @dataclass
 class GraphDeps:
     diff_provider: DiffProvider
+    config_provider: RepoConfigProvider
     publisher: ReviewPublisher
     static_analyzer: StaticAnalyzer
     llm: LLMClient

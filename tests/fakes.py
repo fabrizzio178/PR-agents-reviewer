@@ -11,6 +11,7 @@ from agent_langgraph.domain.models import (
     Finding,
     InlineComment,
     LLMResult,
+    RepoConfig,
     ReviewItem,
     ReviewTarget,
     Severity,
@@ -48,6 +49,16 @@ class FakeDiffProvider:
 
 
 @dataclass
+class FakeConfigProvider:
+    config: RepoConfig | Exception = field(default_factory=RepoConfig)
+
+    def load(self, target: ReviewTarget) -> RepoConfig:
+        if isinstance(self.config, Exception):
+            raise self.config
+        return self.config
+
+
+@dataclass
 class FakePublisher:
     statuses: list[str] = field(default_factory=list)
     inline: list[list[InlineComment]] = field(default_factory=list)
@@ -82,7 +93,9 @@ class FakeLLM:
 
     def review(self, system_prompt: str, user_prompt: str) -> LLMResult:
         self.prompts.append((system_prompt, user_prompt))
-        answer = {SECURITY_PROMPT: self.security, CODE_ARCH_PROMPT: self.code_arch}[system_prompt]
+        # Prefix match: repo rules may be appended to the base prompt.
+        answer = self.security if system_prompt.startswith(SECURITY_PROMPT) else self.code_arch
+        assert system_prompt.startswith((SECURITY_PROMPT, CODE_ARCH_PROMPT))
         if isinstance(answer, Exception):
             raise answer
         return LLMResult(items=list(answer), usage=TokenUsage(input_tokens=100, output_tokens=10))
@@ -103,6 +116,7 @@ def make_harness(
     analyzer: FakeAnalyzer | None = None,
     config: ReviewConfig | None = None,
     diff: FakeDiffProvider | None = None,
+    repo_config: RepoConfig | Exception | None = None,
 ) -> Harness:
     diff = diff or FakeDiffProvider(files if files is not None else [PY_FILE])
     publisher = FakePublisher()
@@ -110,6 +124,9 @@ def make_harness(
     llm = llm or FakeLLM()
     deps = GraphDeps(
         diff_provider=diff,
+        config_provider=FakeConfigProvider(
+            repo_config if repo_config is not None else RepoConfig()
+        ),
         publisher=publisher,
         static_analyzer=analyzer,
         llm=llm,

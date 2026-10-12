@@ -67,6 +67,14 @@ def render_review(state: GraphState) -> str:
         lines.append("These reviewers failed, so their part of the diff was **not** checked:")
         lines += [f"- {sanitize(e)}" for e in errors]
 
+    config_warning = state.get("config_warning")
+    if config_warning:
+        lines += [
+            "",
+            f"⚠️ `.pr-review.yml` is invalid and was ignored ({sanitize(config_warning)}). "
+            "Defaults were used.",
+        ]
+
     truncated = state.get("truncated_files", [])
     if truncated:
         lines += ["", "#### ✂️ Not fully reviewed (diff too large)", ""]

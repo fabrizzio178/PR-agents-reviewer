@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import operator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Annotated, TypedDict
 
@@ -82,6 +82,16 @@ class LLMResult:
 
 
 @dataclass(frozen=True)
+class RepoConfig:
+    """Per-repository review settings, read from `.pr-review.yml` on the base branch."""
+
+    disabled_reviewers: list[str] = field(default_factory=list)
+    ignore: list[str] = field(default_factory=list)
+    rules: list[str] = field(default_factory=list)
+    gate_severity: Severity | None = None
+
+
+@dataclass(frozen=True)
 class ReviewVerdict:
     findings: list[Finding]
     max_severity: Severity
@@ -97,6 +107,8 @@ class GraphState(TypedDict, total=False):
     """
 
     target: ReviewTarget
+    repo_config: RepoConfig
+    config_warning: str | None
     files: list[FileChange]
     truncated_files: list[str]
     active_agents: list[str]
