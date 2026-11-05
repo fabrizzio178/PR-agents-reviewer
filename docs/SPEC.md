@@ -57,6 +57,9 @@ job efímero de GitHub Actions:
 - Ejecución local por CLI contra cualquier PR accesible con el token.
 - Análisis estático de Python con ruff sobre las líneas agregadas.
 - Aprobación humana asíncrona vía GitHub Environments.
+- Merge requests de GitLab (gitlab.com o self-managed) desde un pipeline
+  `merge_request_event`: nota resumen, discusiones por línea y aprobación con un
+  job manual (`REVIEW_PLATFORM=gitlab`, entrypoint `gitlab_ci_entrypoint`).
 - Suite de evals offline con precision/recall por agente.
 
 **No incluye (por ahora)**

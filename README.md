@@ -235,6 +235,77 @@ Inputs opcionales: `agent_ref` (fijar un tag o SHA del agente en vez de
 cubre Python; los agentes LLM revisan cualquier lenguaje que el supervisor
 reconozca.
 
+## Usarlo en GitLab
+
+El mismo grafo corre en un pipeline de merge request de GitLab, sin servidor y
+con la misma pausa para aprobación humana. Cambian el disparador y la API:
+
+| Pieza | GitHub | GitLab |
+|---|---|---|
+| Disparador | `pull_request` | pipeline con `CI_PIPELINE_SOURCE == "merge_request_event"` |
+| Resumen | comentario de la PR | nota del MR (se edita en cada push) |
+| Comentarios por línea | una review con todos | una discusión por hallazgo |
+| Aprobación | Environment con reviewers | job `when: manual` |
+| Token | `GITHUB_TOKEN` automático | Project Access Token con scope `api` (`CI_JOB_TOKEN` no puede comentar) |
+
+Variables del job: `GITLAB_TOKEN` (el Project Access Token), la key del modelo y,
+opcionalmente, `GITLAB_API_URL` (por defecto toma `CI_API_V4_URL`). El
+entrypoint escribe un reporte dotenv con `REVIEW_PAUSED` y `REVIEW_THREAD` para
+el job de aprobación, y deja el checkpoint en `REVIEW_CHECKPOINT_PATH`.
+
+```yaml
+.pr-agent:
+  image: python:3.12-slim
+  variables:
+    AGENT_REF: <sha fijo del agente>
+    REVIEW_CHECKPOINT_PATH: $CI_PROJECT_DIR/checkpoint.sqlite
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - pip install --quiet "uv==0.11.18"
+    - git clone --quiet https://github.com/fabrizzio178/PR-agents-reviewer.git /tmp/agent
+    - git -C /tmp/agent checkout --quiet "$AGENT_REF"
+    - uv sync --project /tmp/agent --frozen --no-dev
+
+pr-review:
+  extends: .pr-agent
+  allow_failure: true            # informa; no es un gate
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GITLAB_TOKEN: $GITLAB_REVIEW_TOKEN
+  script:
+    - uv run --project /tmp/agent --frozen --no-dev
+      python -m agent_langgraph.entrypoints.gitlab_ci_entrypoint analyze
+  artifacts:
+    when: always
+    expire_in: 1 day
+    paths: [checkpoint.sqlite, review.md]
+    reports: {dotenv: review.env}
+
+pr-review-approve:
+  extends: .pr-agent
+  needs: [pr-review]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true        # opcional: no deja el pipeline bloqueado
+  variables:
+    GITLAB_TOKEN: $GITLAB_REVIEW_TOKEN
+  script:
+    - uv run --project /tmp/agent --frozen --no-dev
+      python -m agent_langgraph.entrypoints.gitlab_ci_entrypoint resume
+```
+
+Dos diferencias con GitHub que conviene saber:
+
+- **El job de aprobación siempre aparece.** GitLab evalúa `rules` al crear el
+  pipeline, antes de saber si la revisión se va a pausar. Si no hay nada
+  pausado, `resume` termina sin hacer nada.
+- **El `.gitlab-ci.yml` sale de la rama del MR.** A diferencia de
+  `pull_request` en GitHub, quien abre el MR puede cambiar el job (y leer las
+  variables no protegidas). Limitar quién puede abrir MRs y darle al token el
+  rol mínimo que funcione.
+
 ## Calidad
 
 ```bash

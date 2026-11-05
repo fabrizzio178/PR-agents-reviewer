@@ -1,4 +1,4 @@
-"""Pure helpers over unified-diff patches as returned by the GitHub API."""
+"""Pure helpers over unified-diff patches as returned by the GitHub and GitLab APIs."""
 
 from __future__ import annotations
 
@@ -41,8 +41,39 @@ def added_lines(patch: str) -> set[int]:
 
 
 def commentable_lines(patch: str) -> set[int]:
-    """New-file line numbers GitHub accepts an inline review comment on."""
+    """New-file line numbers an inline review comment can be anchored to."""
     return {n for kind, n, _ in _walk(patch) if kind in ("add", "context") and n is not None}
+
+
+_HUNK_HEADER_FULL = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def line_positions(patch: str) -> dict[int, int | None]:
+    """Map each commentable new-file line to its old-file line.
+
+    Added lines map to None (they have no old line). Context lines map to the
+    old line they came from: GitLab needs both numbers to anchor a comment on
+    an unchanged line, while GitHub only needs the new one.
+    """
+    positions: dict[int, int | None] = {}
+    old: int | None = None
+    new: int | None = None
+    for raw in patch.splitlines():
+        header = _HUNK_HEADER_FULL.match(raw)
+        if header:
+            old, new = int(header.group(1)), int(header.group(2))
+        elif old is None or new is None or raw.startswith("\\"):
+            continue
+        elif raw.startswith("+"):
+            positions[new] = None
+            new += 1
+        elif raw.startswith("-"):
+            old += 1
+        else:
+            positions[new] = old
+            old += 1
+            new += 1
+    return positions
 
 
 def annotate_patch(patch: str) -> str:

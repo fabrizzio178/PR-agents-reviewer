@@ -26,7 +26,7 @@ CODE_EXTENSIONS = {
 # but exactly where secrets, permissions and supply-chain changes show up.
 SECURITY_EXTENSIONS = CODE_EXTENSIONS | {
     ".yml", ".yaml", ".json", ".toml", ".ini", ".cfg", ".tf", ".sql", ".sh",
-    ".ps1", ".lock", ".gradle", ".xml",
+    ".ps1", ".lock", ".gradle", ".xml", ".conf", ".properties", ".csproj",
 }  # fmt: skip
 SECURITY_FILENAMES = {"dockerfile", "makefile", "gemfile", "go.mod", "go.sum"}
 

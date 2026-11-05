@@ -16,6 +16,10 @@ from agent_langgraph.domain.models import Severity
 GEMINI = "gemini"
 OPENAI_COMPATIBLE = "openai-compatible"
 
+GITHUB = "github"
+GITLAB = "gitlab"
+GITHUB_API_URL = "https://api.github.com"
+
 
 @dataclass(frozen=True)
 class LLMSettings:
@@ -46,17 +50,43 @@ class LLMSettings:
 
 
 @dataclass(frozen=True)
+class PlatformSettings:
+    """Where the merge/pull request lives and how to authenticate against it."""
+
+    name: str
+    token: str
+    api_url: str
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str], default: str = GITHUB) -> PlatformSettings:
+        name = (env.get("REVIEW_PLATFORM") or default).strip().lower()
+        if name == GITHUB:
+            return cls(
+                name=GITHUB,
+                token=_require(env, "GITHUB_TOKEN"),
+                api_url=env.get("GITHUB_API_URL") or GITHUB_API_URL,
+            )
+        if name == GITLAB:
+            # CI_API_V4_URL is predefined in every GitLab CI job.
+            api_url = env.get("GITLAB_API_URL") or env.get("CI_API_V4_URL")
+            if not api_url:
+                raise RuntimeError("Missing required environment variable: GITLAB_API_URL")
+            return cls(name=GITLAB, token=_require(env, "GITLAB_TOKEN"), api_url=api_url)
+        raise RuntimeError(f"REVIEW_PLATFORM must be '{GITHUB}' or '{GITLAB}', got {name!r}")
+
+
+@dataclass(frozen=True)
 class Settings:
-    github_token: str
+    platform: PlatformSettings
     llm: LLMSettings
     checkpoint_path: str
     review: ReviewConfig
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str]) -> Settings:
+    def from_env(cls, env: Mapping[str, str], default_platform: str = GITHUB) -> Settings:
         defaults = ReviewConfig()
         return cls(
-            github_token=_require(env, "GITHUB_TOKEN"),
+            platform=PlatformSettings.from_env(env, default_platform),
             llm=LLMSettings.from_env(env),
             checkpoint_path=env.get("REVIEW_CHECKPOINT_PATH") or "agent_langgraph.sqlite",
             review=ReviewConfig(
