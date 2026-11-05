@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from google import genai
 from google.genai import errors, types
+from pydantic import BaseModel
 
-from agent_langgraph.adapters.llm.schema import ReviewSchema, parse_review
+from agent_langgraph.adapters.llm.schema import ReviewSchema, parse_as, to_review_items
 from agent_langgraph.domain.errors import LLMError
 from agent_langgraph.domain.models import LLMResult, TokenUsage
 
@@ -38,6 +39,12 @@ class GeminiLLMClient:
         self._model = model
 
     def review(self, system_prompt: str, user_prompt: str) -> LLMResult:
+        parsed, usage = self.generate(system_prompt, user_prompt, ReviewSchema)
+        return LLMResult(items=to_review_items(parsed), usage=usage)
+
+    def generate[M: BaseModel](
+        self, system_prompt: str, user_prompt: str, schema: type[M]
+    ) -> tuple[M, TokenUsage]:
         try:
             response = self._client.models.generate_content(
                 model=self._model,
@@ -46,7 +53,7 @@ class GeminiLLMClient:
                     system_instruction=system_prompt,
                     temperature=0.1,
                     response_mime_type="application/json",
-                    response_schema=ReviewSchema,
+                    response_schema=schema,
                     # No tools are passed; this only silences the SDK's AFC notice.
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 ),
@@ -57,10 +64,7 @@ class GeminiLLMClient:
             raise LLMError(f"Gemini request failed: {exc.code} {exc.status}") from exc
 
         usage = response.usage_metadata
-        return LLMResult(
-            items=parse_review(response.text or ""),
-            usage=TokenUsage(
-                input_tokens=(usage.prompt_token_count or 0) if usage else 0,
-                output_tokens=(usage.candidates_token_count or 0) if usage else 0,
-            ),
+        return parse_as(schema, response.text or ""), TokenUsage(
+            input_tokens=(usage.prompt_token_count or 0) if usage else 0,
+            output_tokens=(usage.candidates_token_count or 0) if usage else 0,
         )

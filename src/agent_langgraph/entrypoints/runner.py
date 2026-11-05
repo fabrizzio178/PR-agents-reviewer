@@ -27,6 +27,7 @@ _CHECKPOINT_TYPES = (
     models.ReviewTarget,
     models.FileChange,
     models.Finding,
+    models.DiscardedFinding,
     models.Severity,
     models.TokenUsage,
     models.ReviewVerdict,

@@ -1,5 +1,8 @@
 """Ports: interfaces the application layer depends on. Adapters implement these.
 
+Structured output is typed with pydantic models: the one library dependency the
+domain allows, because it is only a data contract.
+
 Keeping these as Protocols (structural typing) means the application layer
 never imports a concrete adapter (requests, google-genai, subprocess)
 directly, so swapping the GitHub REST adapter for an MCP-based one later is a
@@ -10,6 +13,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from pydantic import BaseModel
+
 from agent_langgraph.domain.models import (
     FileChange,
     Finding,
@@ -17,6 +22,7 @@ from agent_langgraph.domain.models import (
     LLMResult,
     RepoConfig,
     ReviewTarget,
+    TokenUsage,
 )
 
 
@@ -52,4 +58,13 @@ class StaticAnalyzer(Protocol):
 class LLMClient(Protocol):
     def review(self, system_prompt: str, user_prompt: str) -> LLMResult:
         """Raises LLMError on transport failure or schema-invalid output."""
+        ...
+
+    def generate[T: BaseModel](
+        self, system_prompt: str, user_prompt: str, schema: type[T]
+    ) -> tuple[T, TokenUsage]:
+        """Ask for a reply shaped like `schema` (a pydantic model) and return it validated.
+
+        Raises LLMError on transport failure or schema-invalid output.
+        """
         ...

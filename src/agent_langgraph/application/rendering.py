@@ -6,7 +6,13 @@ sanitized before they reach GitHub: one line, bounded length, no mentions.
 
 from __future__ import annotations
 
-from agent_langgraph.domain.models import Finding, GraphState, ReviewVerdict, Severity
+from agent_langgraph.domain.models import (
+    DiscardedFinding,
+    Finding,
+    GraphState,
+    ReviewVerdict,
+    Severity,
+)
 
 TITLE = "### PR Review Agent"
 _MAX_MESSAGE_CHARS = 500
@@ -37,8 +43,9 @@ def render_counts(verdict: ReviewVerdict) -> str:
 
 def render_inline(finding: Finding) -> str:
     return (
-        f"**{_SEVERITY_LABEL[finding.severity]}** · `{finding.agent}`\n\n"
-        f"{sanitize(finding.message)}"
+        f"**{_SEVERITY_LABEL[finding.severity]}** · `{finding.agent}`"
+        f"{' · unverified' if finding.unverified else ''}\n\n"
+        f"{sanitize(finding.message)}{_unverified_note(finding)}"
     )
 
 
@@ -61,6 +68,24 @@ def render_review(state: GraphState) -> str:
             continue
         lines += ["", f"#### {_SEVERITY_LABEL[severity]}", ""]
         lines += [_render_finding(f) for f in group]
+
+    discarded = state.get("discarded") or []
+    if discarded:
+        lines += [
+            "",
+            f"<details><summary>🧪 Discarded by the self-check ({len(discarded)})</summary>",
+            "",
+        ]
+        lines += [_render_discarded(d) for d in discarded]
+        lines += ["", "</details>"]
+
+    verification_error = state.get("verification_error")
+    if verification_error:
+        lines += [
+            "",
+            f"⚠️ The self-check did not run ({sanitize(verification_error)}), so these "
+            "findings were not double-checked.",
+        ]
 
     if errors:
         lines += ["", "#### ⚠️ Incomplete review", ""]
@@ -108,9 +133,30 @@ def render_withheld(verdict: ReviewVerdict) -> str:
     )
 
 
+def _location(finding: Finding) -> str:
+    return f"{finding.file}:{finding.line}" if finding.line else finding.file
+
+
 def _render_finding(finding: Finding) -> str:
-    location = f"{finding.file}:{finding.line}" if finding.line else finding.file
-    return f"- `{location}` — {sanitize(finding.message)} _({finding.agent})_"
+    return (
+        f"- `{_location(finding)}` — {sanitize(finding.message)} _({finding.agent})_"
+        f"{_unverified_note(finding)}"
+    )
+
+
+def _unverified_note(finding: Finding) -> str:
+    if not finding.unverified:
+        return ""
+    note = f": {sanitize(finding.verification_note)}" if finding.verification_note else ""
+    return f" ⚠️ _unverified{note}_"
+
+
+def _render_discarded(discarded: DiscardedFinding) -> str:
+    finding = discarded.finding
+    return (
+        f"- `{_location(finding)}` — {sanitize(finding.message)} _({finding.agent})_ "
+        f"→ **why discarded:** {sanitize(discarded.reason)}"
+    )
 
 
 def _render_footer(state: GraphState) -> str:

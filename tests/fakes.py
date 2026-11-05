@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from agent_langgraph.application.deps import GraphDeps, ReviewConfig
-from agent_langgraph.application.prompts import CODE_ARCH_PROMPT, SECURITY_PROMPT
+from agent_langgraph.application.prompts import CODE_ARCH_PROMPT, SECURITY_PROMPT, VERIFIER_PROMPT
+from agent_langgraph.application.schemas import FindingCheck, VerificationSchema
 from agent_langgraph.domain.models import (
     FileChange,
     Finding,
@@ -99,6 +102,30 @@ class FakeLLM:
         if isinstance(answer, Exception):
             raise answer
         return LLMResult(items=list(answer), usage=TokenUsage(input_tokens=100, output_tokens=10))
+
+    # Verifier answers keyed by finding message: (verdict, evidence_against).
+    # Unlisted findings are confirmed. An Exception value is raised instead.
+    verdicts: dict[str, tuple[str, str]] | Exception = field(default_factory=dict)
+    verify_prompts: list[str] = field(default_factory=list)
+
+    def generate(self, system_prompt: str, user_prompt: str, schema: type[Any]) -> Any:
+        assert system_prompt == VERIFIER_PROMPT and schema is VerificationSchema
+        self.verify_prompts.append(user_prompt)
+        if isinstance(self.verdicts, Exception):
+            raise self.verdicts
+        listed = re.findall(
+            r"^(\d+)\. .*?\): (.*)$", user_prompt.split("<findings>")[1], re.MULTILINE
+        )
+        checks = []
+        for number, message in listed:
+            verdict, against = self.verdicts.get(message, ("confirmed", "none"))
+            checks.append(
+                FindingCheck(
+                    id=int(number), verdict=verdict, evidence_for="seen", evidence_against=against
+                )
+            )
+        usage = TokenUsage(input_tokens=50, output_tokens=5)
+        return VerificationSchema(checks=checks), usage
 
 
 @dataclass

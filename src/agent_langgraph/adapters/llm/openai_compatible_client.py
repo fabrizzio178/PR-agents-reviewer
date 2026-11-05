@@ -14,8 +14,9 @@ from collections.abc import Callable
 from typing import Any
 
 import requests
+from pydantic import BaseModel
 
-from agent_langgraph.adapters.llm.schema import ReviewSchema, parse_review
+from agent_langgraph.adapters.llm.schema import ReviewSchema, parse_as, to_review_items
 from agent_langgraph.domain.errors import LLMError
 from agent_langgraph.domain.models import LLMResult, TokenUsage
 
@@ -24,11 +25,13 @@ _MAX_ATTEMPTS = 4
 _MAX_DELAY_SECONDS = 30.0
 _TIMEOUT_SECONDS = 120
 
-_SCHEMA_INSTRUCTION = (
-    "\n\nReply with a single JSON object and nothing else — no prose, no markdown "
-    "fences. It must validate against this JSON Schema:\n"
-    + json.dumps(ReviewSchema.model_json_schema(), separators=(",", ":"))
-)
+
+def _schema_instruction(schema: type[BaseModel]) -> str:
+    return (
+        "\n\nReply with a single JSON object and nothing else — no prose, no markdown "
+        "fences. It must validate against this JSON Schema:\n"
+        + json.dumps(schema.model_json_schema(), separators=(",", ":"))
+    )
 
 
 class OpenAICompatibleLLMClient:
@@ -47,12 +50,18 @@ class OpenAICompatibleLLMClient:
         self._sleep = sleep
 
     def review(self, system_prompt: str, user_prompt: str) -> LLMResult:
+        parsed, usage = self.generate(system_prompt, user_prompt, ReviewSchema)
+        return LLMResult(items=to_review_items(parsed), usage=usage)
+
+    def generate[M: BaseModel](
+        self, system_prompt: str, user_prompt: str, schema: type[M]
+    ) -> tuple[M, TokenUsage]:
         payload = {
             "model": self._model,
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
             "messages": [
-                {"role": "system", "content": system_prompt + _SCHEMA_INSTRUCTION},
+                {"role": "system", "content": system_prompt + _schema_instruction(schema)},
                 {"role": "user", "content": user_prompt},
             ],
         }
@@ -63,12 +72,9 @@ class OpenAICompatibleLLMClient:
             raise LLMError("Provider returned a response without a message") from exc
 
         usage = body.get("usage") or {}
-        return LLMResult(
-            items=parse_review(_extract_json_object(content)),
-            usage=TokenUsage(
-                input_tokens=int(usage.get("prompt_tokens") or 0),
-                output_tokens=int(usage.get("completion_tokens") or 0),
-            ),
+        return parse_as(schema, _extract_json_object(content)), TokenUsage(
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
         )
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:

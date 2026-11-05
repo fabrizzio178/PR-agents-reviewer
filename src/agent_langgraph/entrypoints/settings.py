@@ -93,6 +93,7 @@ class Settings:
                 max_file_chars=_int(env, "REVIEW_MAX_FILE_CHARS", defaults.max_file_chars),
                 max_total_chars=_int(env, "REVIEW_MAX_TOTAL_CHARS", defaults.max_total_chars),
                 gate_severity=_severity(env, "REVIEW_GATE_SEVERITY", defaults.gate_severity),
+                verify_findings=_bool(env, "REVIEW_VERIFY", defaults.verify_findings),
             ),
         )
 
@@ -115,6 +116,17 @@ def _int(env: Mapping[str, str], name: str, default: int) -> int:
     if value <= 0:
         raise RuntimeError(f"{name} must be positive, got {value}")
     return value
+
+
+def _bool(env: Mapping[str, str], name: str, default: bool) -> bool:
+    raw = (env.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise RuntimeError(f"{name} must be true or false, got {raw!r}")
 
 
 def _severity(env: Mapping[str, str], name: str, default: Severity) -> Severity:

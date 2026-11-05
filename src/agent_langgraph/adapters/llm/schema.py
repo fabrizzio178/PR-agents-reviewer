@@ -26,11 +26,14 @@ class ReviewSchema(BaseModel):
     findings: list[FindingSchema]
 
 
-def parse_review(text: str) -> list[ReviewItem]:
+def parse_as[M: BaseModel](schema: type[M], text: str) -> M:
     try:
-        parsed = ReviewSchema.model_validate_json(text)
+        return schema.model_validate_json(text)
     except ValidationError as exc:
         raise LLMError("Model returned output that does not match the schema") from exc
+
+
+def to_review_items(parsed: ReviewSchema) -> list[ReviewItem]:
     return [
         ReviewItem(
             file=f.file,
@@ -40,3 +43,7 @@ def parse_review(text: str) -> list[ReviewItem]:
         )
         for f in parsed.findings
     ]
+
+
+def parse_review(text: str) -> list[ReviewItem]:
+    return to_review_items(parse_as(ReviewSchema, text))

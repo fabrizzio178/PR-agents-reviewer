@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
+from agent_langgraph.application.deps import ReviewConfig
 from agent_langgraph.application.graph import build_graph
 from agent_langgraph.domain.errors import LLMError, StaticAnalysisError
 from agent_langgraph.domain.models import Finding, ReviewItem, Severity
@@ -67,7 +68,8 @@ def test_medium_findings_post_without_human_gate():
     # Only the finding whose line is inside the diff becomes an inline comment.
     [inline] = h.publisher.inline
     assert [(c.path, c.line) for c in inline] == [("app/config.py", 4)]
-    assert "tokens: 200 in / 20 out" in outcome.body
+    # Two reviewers (100/10 each) plus the verifier (50/5).
+    assert "tokens: 250 in / 25 out" in outcome.body
 
 
 def test_high_finding_pauses_then_publishes_on_approval():
@@ -206,3 +208,74 @@ def test_resume_without_a_paused_review_fails():
         resume_review(graph, "t1", approved=True)
     with pytest.raises(NoPausedReviewError):
         resume_review(graph, "unknown-thread", approved=True)
+
+
+def test_verifier_drops_refuted_findings_and_says_why():
+    llm = FakeLLM(
+        security=[HIGH_SECRET],
+        code_arch=[MEDIUM_BUG],
+        verdicts={
+            "Hardcoded API key.": ("refuted", "The value is a test fixture."),
+        },
+    )
+    h = make_harness(llm=llm)
+    _, outcome = run(h)
+
+    # The refuted high finding no longer pauses the review for a human.
+    assert outcome.paused is False and outcome.posted is True
+    assert "Found 1 medium." in outcome.body
+    assert "Discarded by the self-check (1)" in outcome.body
+    assert "The value is a test fixture." in outcome.body
+    [inline] = h.publisher.inline
+    assert [(c.path, c.line) for c in inline] == [("app/config.py", 4)]
+
+
+def test_verifier_marks_uncertain_findings_as_unverified():
+    llm = FakeLLM(
+        code_arch=[MEDIUM_BUG],
+        verdicts={
+            "Prints a secret to stdout.": ("uncertain", "Depends on the logger."),
+        },
+    )
+    h = make_harness(llm=llm)
+    _, outcome = run(h)
+
+    assert "Prints a secret to stdout." in outcome.body
+    assert "unverified: Depends on the logger." in outcome.body
+    [inline] = h.publisher.inline
+    assert "unverified" in inline[0].body
+
+
+def test_verifier_failure_keeps_every_finding():
+    llm = FakeLLM(code_arch=[MEDIUM_BUG], verdicts=LLMError("quota exceeded"))
+    h = make_harness(llm=llm)
+    _, outcome = run(h)
+
+    assert "Prints a secret to stdout." in outcome.body
+    assert "self-check did not run (quota exceeded)" in outcome.body
+
+
+def test_verifier_skips_static_analysis_findings():
+    ruff = Finding(
+        agent="static_analysis",
+        file="app/config.py",
+        line=1,
+        message="F401 unused import",
+        severity=Severity.LOW,
+    )
+    h = make_harness(analyzer=FakeAnalyzer(findings=[ruff]))
+    _, outcome = run(h)
+
+    assert h.llm.verify_prompts == []
+    assert "F401 unused import" in outcome.body
+
+
+def test_verifier_can_be_turned_off():
+    llm = FakeLLM(
+        code_arch=[MEDIUM_BUG], verdicts={"Prints a secret to stdout.": ("refuted", "nope")}
+    )
+    h = make_harness(llm=llm, config=ReviewConfig(verify_findings=False))
+    _, outcome = run(h)
+
+    assert h.llm.verify_prompts == []
+    assert "Prints a secret to stdout." in outcome.body

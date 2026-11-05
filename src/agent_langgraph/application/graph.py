@@ -1,14 +1,14 @@
 r"""Builds the LangGraph StateGraph: wires every node and conditional edge.
 
                               /-> STATIC_ANALYSIS -\
-    INGEST -> SUPERVISOR --(fan-out)-> SECURITY ----+-> AGGREGATOR
-                    \         \-> CODE_ARCH -------/        |
-                     \---------(docs only)-----------------/|
-                                                        RISK_GATE
-                                                        /       \
-                                           notify_pending        \
-                                                  |               \
-                                            human_review --------> post -> END
+    INGEST -> SUPERVISOR --(fan-out)-> SECURITY ----+-> VERIFIER -> AGGREGATOR
+                    \         \-> CODE_ARCH -------/                    |
+                     \---------(docs only)-----------------------------/|
+                                                                    RISK_GATE
+                                                                    /       \
+                                                       notify_pending        \
+                                                              |               \
+                                                        human_review --------> post -> END
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from agent_langgraph.application.nodes.supervisor import (
     route_from_supervisor,
     supervisor,
 )
+from agent_langgraph.application.nodes.verifier import VERIFIER, make_verifier
 from agent_langgraph.application.prompts import CODE_ARCH_PROMPT, SECURITY_PROMPT
 from agent_langgraph.domain.models import GraphState
 
@@ -56,6 +57,7 @@ def build_graph(
     graph.add_node(
         CODE_ARCH, timed(CODE_ARCH, make_review_agent(CODE_ARCH, CODE_ARCH_PROMPT, deps))
     )
+    graph.add_node(VERIFIER, timed(VERIFIER, make_verifier(deps)))
     graph.add_node(AGGREGATOR, timed(AGGREGATOR, make_aggregator(deps)))
     graph.add_node(
         "notify_pending",
@@ -78,9 +80,10 @@ def build_graph(
             AGGREGATOR: AGGREGATOR,
         },
     )
-    graph.add_edge(STATIC_ANALYSIS, AGGREGATOR)
-    graph.add_edge(SECURITY, AGGREGATOR)
-    graph.add_edge(CODE_ARCH, AGGREGATOR)
+    graph.add_edge(STATIC_ANALYSIS, VERIFIER)
+    graph.add_edge(SECURITY, VERIFIER)
+    graph.add_edge(CODE_ARCH, VERIFIER)
+    graph.add_edge(VERIFIER, AGGREGATOR)
 
     graph.add_conditional_edges(
         AGGREGATOR,

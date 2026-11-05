@@ -54,6 +54,17 @@ class Finding:
     message: str
     severity: Severity
     line: int | None = None
+    # Set by the verifier when it could neither confirm nor refute the finding.
+    unverified: bool = False
+    verification_note: str | None = None
+
+
+@dataclass(frozen=True)
+class DiscardedFinding:
+    """A finding the verifier refuted, kept so the summary can say why it was dropped."""
+
+    finding: Finding
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -113,6 +124,10 @@ class GraphState(TypedDict, total=False):
     truncated_files: list[str]
     active_agents: list[str]
     findings: Annotated[list[Finding], operator.add]
+    # Written once by the verifier: the findings that survived the self-check.
+    verified_findings: list[Finding]
+    discarded: list[DiscardedFinding]
+    verification_error: str | None
     agent_errors: Annotated[list[str], operator.add]
     usage: Annotated[TokenUsage, operator.add]
     verdict: ReviewVerdict | None

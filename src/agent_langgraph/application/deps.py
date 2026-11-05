@@ -20,6 +20,8 @@ class ReviewConfig:
     max_total_chars: int = 120_000
     # Lowest severity that pauses the graph for human approval before posting.
     gate_severity: Severity = Severity.HIGH
+    # Second LLM pass that tries to refute each finding before it is published.
+    verify_findings: bool = True
 
 
 @dataclass

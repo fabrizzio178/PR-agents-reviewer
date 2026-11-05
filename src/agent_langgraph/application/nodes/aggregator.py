@@ -11,8 +11,12 @@ from agent_langgraph.domain.models import Finding, GraphState, ReviewVerdict, Se
 
 def make_aggregator(deps: GraphDeps) -> Callable[[GraphState], dict[str, Any]]:
     def aggregator(state: GraphState) -> dict[str, Any]:
+        # The verifier's output when it ran; the raw findings otherwise (docs-only path).
+        findings = state.get("verified_findings")
+        if findings is None:
+            findings = state.get("findings", [])
         ranked = sorted(
-            _dedupe(state.get("findings", [])),
+            _dedupe(findings),
             key=lambda f: (-f.severity.rank, f.file, f.line or 0),
         )
         max_severity = ranked[0].severity if ranked else Severity.LOW
