@@ -49,6 +49,10 @@ class GitLabRestClient:
     def get(self, path: str, params: dict[str, str] | None = None) -> Any:
         return self._request("GET", self._base_url + path, params=params).json()
 
+    def get_text(self, path: str) -> str:
+        """For endpoints that answer plain text, such as a job log."""
+        return self._request("GET", self._base_url + path).text
+
     def paginate(self, path: str, per_page: int = 100) -> Iterator[Any]:
         """Yield every item of a list endpoint, following `Link: rel="next"`."""
         url: str | None = f"{self._base_url}{path}?per_page={per_page}"

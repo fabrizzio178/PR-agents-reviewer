@@ -10,6 +10,7 @@ graph TD;
 	static_analysis(static_analysis)
 	security(security)
 	code_arch(code_arch)
+	verifier(verifier)
 	aggregator(aggregator)
 	notify_pending(notify_pending)
 	human_review(human_review)
@@ -18,16 +19,17 @@ graph TD;
 	__start__ --> ingest;
 	aggregator -.-> notify_pending;
 	aggregator -.-> post;
-	code_arch --> aggregator;
+	code_arch --> verifier;
 	human_review --> post;
 	ingest --> supervisor;
 	notify_pending --> human_review;
-	security --> aggregator;
-	static_analysis --> aggregator;
+	security --> verifier;
+	static_analysis --> verifier;
 	supervisor -.-> aggregator;
 	supervisor -.-> code_arch;
 	supervisor -.-> security;
 	supervisor -.-> static_analysis;
+	verifier --> aggregator;
 	post --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0

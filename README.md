@@ -65,9 +65,10 @@ flowchart TD
         sup -.->|"codigo, config, deps"| sec["security agent"]
         sup -.->|"codigo"| arch["code_arch agent"]
         sup -.->|"solo docs"| agg
-        sa --> agg["aggregator: dedupe + ranking"]
-        sec --> agg
-        arch --> agg
+        sa --> ver["verifier: intenta refutar cada hallazgo"]
+        sec --> ver
+        arch --> ver
+        ver --> agg["aggregator: dedupe + ranking"]
         agg --> gate{"risk gate"}
         gate -->|"menor que HIGH"| post["post: review inline + comentario sticky"]
         gate -->|"HIGH"| np["notify_pending: aviso de espera"]
@@ -92,6 +93,13 @@ regenera con `uv run visualize-graph`.
 - Los agentes LLM devuelven **salida estructurada** validada contra un
   schema. Si un agente falla, el comentario lo dice ("revisión incompleta");
   un fallo nunca se publica como "sin problemas".
+- El **verifier** es una segunda pasada del modelo con el trabajo opuesto:
+  buscar evidencia en contra de cada hallazgo, usando solo el diff. Lo que
+  queda refutado no se publica, pero aparece con el motivo en una sección
+  plegada del comentario; lo que no puede confirmar ni refutar se publica
+  marcado como *unverified*. Los hallazgos de ruff no pasan por acá. Si el
+  verifier falla, se publican todos y el comentario lo avisa.
+  `REVIEW_VERIFY=false` lo apaga.
 - El **risk gate** enruta los veredictos de severidad alta a `human_review`.
   El PR ve un aviso de "esperando aprobación" y los detalles se publican
   recién cuando un maintainer aprueba.
@@ -306,6 +314,56 @@ Dos diferencias con GitHub que conviene saber:
   variables no protegidas). Limitar quién puede abrir MRs y darle al token el
   rol mínimo que funcione.
 
+## Modo incidentes
+
+Además de revisar MRs, el agente puede investigar un pipeline de deploy que
+falló. La idea viene de [AWS DevOps Agent](https://docs.aws.amazon.com/devopsagent/latest/userguide/getting-started-with-aws-devops-agent.html),
+reducida a lo que entra en un job de CI y sin depender de AWS.
+
+```mermaid
+flowchart LR
+    c["collect: jobs, logs de los que fallaron, commits desde el último pipeline bueno"] --> h["hypothesize: 2 a 5 causas posibles"]
+    h --> r["refute: busca evidencia en contra de cada una"]
+    r --> p["plan: pasos, chequeos, criterio de éxito y vuelta atrás"]
+    p --> rep["report"] --> pub["publish: un issue por pipeline"]
+```
+
+- **Solo lee.** Todo lo que consulta es un `GET` a la API de GitLab; lo único
+  que escribe es el issue. El plan es una recomendación para una persona.
+- **Mapa de servicios.** `.incident.yml` en el repo investigado dice qué
+  servicios hay, qué carpeta construye cada uno, quién llama a quién y qué
+  sabe el equipo (runbook). Con eso el agente cruza "qué cambió" con "qué
+  falló". Sin el archivo investiga igual y el informe lo avisa.
+- **Los logs se limpian antes de salir.** Se recortan a las últimas líneas de
+  los jobs que fallaron de verdad (no los `allow_failure`) y se borran
+  formas comunes de secretos (`redaction.py`) además del enmascarado de
+  GitLab. Logs y títulos de commits van marcados como datos no confiables.
+- **Una causa raíz tiene que sobrevivir a su refutación.** Si el modelo elige
+  una hipótesis que no quedó como *supported*, el grafo la descarta y el
+  informe dice "no determinada".
+- **Si un paso del modelo falla**, el issue se publica igual con la
+  evidencia juntada y el paso que falló.
+
+```yaml
+investigar-incidente:
+  stage: diagnostico           # el último stage
+  image: python:3.12-slim
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_failure         # solo si falló un job que no admite fallas
+  allow_failure: true
+  variables:
+    GITLAB_TOKEN: $REVIEW_GITLAB_TOKEN   # rol Reporter alcanza para crear issues
+  script:
+    - uv run --project /tmp/agent --frozen --no-dev
+      python -m agent_langgraph.entrypoints.gitlab_incident_entrypoint
+  artifacts:
+    when: always
+    paths: [incident.md]
+```
+
+`--dry-run` escribe `incident.md` sin abrir el issue.
+
 ## Calidad
 
 ```bash
@@ -335,6 +393,10 @@ Cambiar un prompt o el modelo exige correr las evals (Constitution §10).
 Cada nodo emite una línea JSON a stderr con su nombre, resultado y duración.
 El comentario publicado incluye los tokens consumidos. Para trazas completas,
 definir `LANGSMITH_TRACING=true` y `LANGSMITH_API_KEY`.
+
+## Licencia
+
+MIT, ver [LICENSE](LICENSE).
 
 ## Roadmap
 
